@@ -138,7 +138,7 @@ static unsigned long dec_cpu_load;
  * Increasing frequency table index
  * zero disables and causes to always jump straight to max frequency.
  */
-#define DEFAULT_PUMP_UP_STEP 2
+#define DEFAULT_PUMP_UP_STEP 1
 static unsigned long pump_up_step;
 
 /*
@@ -281,14 +281,14 @@ static unsigned int get_nr_run_avg(void)
 
 #ifdef CONFIG_MACH_MIDAS
 static int hotplug_rq[4][2] = {
-	{0,200}, {200, 300}, {300, 400}, {400, 0}
+	{0,100}, {100, 200}, {200, 300}, {300, 0}
 };
 
 static int hotplug_freq[4][2] = {
 	{0, 500000},
 	{200000, 500000},
-	{400000, 800000},
-	{500000, 0}
+	{200000, 500000},
+	{200000, 0}
 };
 #else
 static int hotplug_rq[4][2] = {
