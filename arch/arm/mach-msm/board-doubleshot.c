@@ -80,6 +80,7 @@
 #include <mach/msm_spi.h>
 #include <mach/msm_serial_hs.h>
 #include <mach/msm_serial_hs_lite.h>
+#include <mach/bcm_bt_lpm.h>
 #include <mach/msm_iomap.h>
 #include <mach/msm_memtypes.h>
 #include <asm/mach/mmc.h>
@@ -1193,7 +1194,7 @@ static void msm_hsusb_vbus_power(bool on)
 static int doubleshot_phy_init_seq[] = { 0x06, 0x36, 0x0C, 0x31, 0x31, 0x32, 0x1, 0x0E, 0x1, 0x11, -1 };
 static struct msm_otg_platform_data msm_otg_pdata = {
 	.phy_init_seq		= doubleshot_phy_init_seq,
-	.mode			= USB_PERIPHERAL,
+	.mode			= USB_OTG,
 	.otg_control		= OTG_PMIC_CONTROL,
 	.phy_type		= CI_45NM_INTEGRATED_PHY,
 	.vbus_power		= msm_hsusb_vbus_power,
@@ -2309,8 +2310,24 @@ static int configure_uart_gpios(int on)
 
 static struct msm_serial_hs_platform_data msm_uart_dm1_pdata = {
 	.inject_rx_on_wakeup = 1,
-	.rx_to_inject = 0xFD,
+	.rx_to_inject = 0xFD,	
 	.gpio_config = configure_uart_gpios,
+	.exit_lpm_cb = bcm_bt_lpm_exit_lpm_locked,
+};
+
+static struct bcm_bt_lpm_platform_data bcm_bt_lpm_pdata = {
+	.gpio_wake = DOUBLESHOT_GPIO_BT_CHIP_WAKE,
+	.gpio_host_wake = DOUBLESHOT_GPIO_BT_HOST_WAKE,
+	.request_clock_off_locked = msm_hs_request_clock_off_locked,
+	.request_clock_on_locked = msm_hs_request_clock_on_locked,
+};
+
+struct platform_device doubleshot_bcm_bt_lpm_device = {
+	.name = "bcm_bt_lpm",
+	.id = 0,
+	.dev = {
+		.platform_data = &bcm_bt_lpm_pdata,
+	},
 };
 #endif
 
@@ -3326,6 +3343,7 @@ static struct platform_device *doubleshot_devices[] __initdata = {
 #endif
 #ifdef CONFIG_SERIAL_MSM_HS
 	&msm_device_uart_dm1,
+	&doubleshot_bcm_bt_lpm_device,
 #endif
 #ifdef CONFIG_MSM_SSBI
 	&msm_device_ssbi_pmic1,
@@ -3346,6 +3364,7 @@ static struct platform_device *doubleshot_devices[] __initdata = {
 #endif
 
 	&msm_device_otg,
+	&msm_device_hsusb_host,
 #ifdef CONFIG_BATTERY_MSM
 	&msm_batt_device,
 #endif
@@ -5384,7 +5403,6 @@ static void __init msm8x60_init_buses(void)
 #endif
 
 #ifdef CONFIG_SERIAL_MSM_HS
-	msm_uart_dm1_pdata.wakeup_irq = gpio_to_irq(DOUBLESHOT_GPIO_BT_HOST_WAKE);
 	msm_device_uart_dm1.dev.platform_data = &msm_uart_dm1_pdata;
 #endif
 
