@@ -19,9 +19,14 @@ obj-$(CONFIG_CPU_FREQ_GOV_ONDEMANDX)	+= cpufreq_ondemandx.o
 #Hotplugging Governors
 obj-$(CONFIG_CPU_FREQ_GOV_HOTPLUG)	+= cpufreq_hotplug.o
 obj-$(CONFIG_CPU_FREQ_GOV_LULZACTIVEQ)	+= cpufreq_lulzactiveq.o
+obj-$(CONFIG_CPU_FREQ_GOV_SAKURACTIVE)  += cpufreq_sakuractive.o
+obj-$(CONFIG_CPU_FREQ_GOV_INTERACTIVEX)	+= cpufreq_interactiveX.o
 
 # CPUfreq cross-arch helpers
 obj-$(CONFIG_CPU_FREQ_TABLE)		+= freq_table.o
+
+#dyanamic voltage & frequency scaling monitor
+obj-$(CONFIG_CPU_FREQ_DVFS_MONITOR)		+= dvfs_monitor.o
 
 ##################################################################################d
 # x86 drivers.
