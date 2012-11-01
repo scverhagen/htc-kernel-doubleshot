@@ -10,8 +10,16 @@ DATE=`date +%Y-%m-%d-%H-%M`
 #go to parent directory:
 cd ..
 
+#if no branch is specified, default to exp branch, otherwise used branch given:
 #make sure that the exp branch is checked out:
-git checkout exp
+if [ "$1" != "" ]; then
+        git checkout $1
+else
+        git checkout exp
+fi
+
+#check out specified branch:
+git checkout 
 
 #update repository:
 git pull origin
@@ -41,5 +49,5 @@ make modules
 cd releasetools
 
 #create zip file:
-./make-zip.sh exp-$DATE
+./make-zip.sh $1-$DATE
 
