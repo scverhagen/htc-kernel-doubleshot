@@ -183,10 +183,10 @@ static int hotplug_rq[4][2] = {
 };
 
 static int hotplug_freq[4][2] = {
-	{0, 486000},
-	{384000, 486000},
-	{384000, 486000},
-	{384000, 0}
+	{0, 500000},
+	{200000, 500000},
+	{200000, 500000},
+	{200000, 0}
 };
 #endif
 
@@ -835,6 +835,12 @@ static void cpu_up_work(struct work_struct *work)
 	if (hotplug_lock)
 		nr_up = hotplug_lock - online;
 
+	if (online == 1) {
+		printk(KERN_ERR "CPU_UP 3\n");
+		cpu_up(num_possible_cpus() - 1);
+		nr_up -= 1;
+	}
+
 	for_each_cpu_not(cpu, cpu_online_mask) {
 		if (nr_up-- == 0)
 			break;
@@ -939,10 +945,10 @@ static int check_up(void)
 	avg_rq /= up_rate;
 	avg_freq /= up_rate;
 
-	if (avg_freq >= up_freq && avg_rq > up_rq) {
+	if (min_freq >= up_freq && min_rq_avg > up_rq) {
 		printk(KERN_ERR "[HOTPLUG IN] %s %d>=%d && %d>%d\n",
 			__func__, min_freq, up_freq, min_rq_avg, up_rq);
-		//hotplug_history->num_hist = 0;
+		hotplug_history->num_hist = 0;
 		return 1;
 	}
 	return 0;
@@ -997,7 +1003,7 @@ static int check_down(void)
 	avg_rq /= down_rate;
 	avg_freq /= down_rate;
 
-	if (avg_freq <= down_freq && avg_rq <= down_rq) {
+	if (max_freq <= down_freq && max_rq_avg <= down_rq) {
 		printk(KERN_ERR "[HOTPLUG OUT] %s %d<=%d && %d<%d\n",
 			__func__, max_freq, down_freq, max_rq_avg, down_rq);
 		//hotplug_history->num_hist = 0;
