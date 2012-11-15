@@ -1,6 +1,9 @@
 /*
- * CPUFreq hotplug governor
+ * CPUFreq sakuractive governor
  *
+ * Copyright (C) 2011 sakuramilk <c.sakuramilk@gmail.com>
+ *
+ * Based on hotplug governor
  * Copyright (C) 2010 Texas Instruments, Inc.
  *   Mike Turquette <mturquette@ti.com>
  *   Santosh Shilimkar <santosh.shilimkar@ti.com>
@@ -36,8 +39,8 @@
 /* Keep 10% of idle under the up threshold when decreasing the frequency */
 #define DEFAULT_FREQ_DOWN_DIFFERENTIAL			(10)
 
-/* less than 35% avg load across online CPUs decreases frequency */
-#define DEFAULT_DOWN_FREQ_MAX_LOAD			(35)
+/* less than 20% avg load across online CPUs decreases frequency */
+#define DEFAULT_DOWN_FREQ_MAX_LOAD			(20)
 
 /* default sampling period (uSec) is bogus; 10x ondemand's default for x86 */
 #define DEFAULT_SAMPLING_PERIOD				(100000)
@@ -51,12 +54,13 @@
 static void do_dbs_timer(struct work_struct *work);
 static int cpufreq_governor_dbs(struct cpufreq_policy *policy,
 		unsigned int event);
+//static int hotplug_boost(struct cpufreq_policy *policy);
 
-#ifndef CONFIG_CPU_FREQ_DEFAULT_GOV_HOTPLUG
+#ifndef CONFIG_CPU_FREQ_DEFAULT_GOV_SAKURACTIVE
 static
 #endif
-struct cpufreq_governor cpufreq_gov_hotplug = {
-       .name                   = "hotplug",
+struct cpufreq_governor cpufreq_gov_sakuractive = {
+       .name                   = "sakuractive",
        .governor               = cpufreq_governor_dbs,
        .owner                  = THIS_MODULE,
 };
@@ -71,6 +75,7 @@ struct cpu_dbs_info_s {
 	struct work_struct cpu_down_work;
 	struct cpufreq_frequency_table *freq_table;
 	int cpu;
+	unsigned int boost_applied;
 	/*
 	 * percpu mutex that serializes governor limit change with
 	 * do_dbs_timer invocation. We do not want do_dbs_timer to run
@@ -101,6 +106,7 @@ static struct dbs_tuners {
 	unsigned int *hotplug_load_history;
 	unsigned int ignore_nice;
 	unsigned int io_is_busy;
+	unsigned int boost_timeout;
 } dbs_tuners_ins = {
 	.sampling_rate =		DEFAULT_SAMPLING_PERIOD,
 	.up_threshold =			DEFAULT_UP_FREQ_MIN_LOAD,
@@ -111,6 +117,7 @@ static struct dbs_tuners {
 	.hotplug_load_index =		0,
 	.ignore_nice =			0,
 	.io_is_busy =			0,
+	.boost_timeout = 0,
 };
 
 /*
@@ -125,13 +132,13 @@ static inline cputime64_t get_cpu_idle_time(unsigned int cpu, cputime64_t *wall)
         u64 idle_time;
         u64 iowait_time;
 
-        /* cpufreq-hotplug always assumes CONFIG_NO_HZ */
+        /* cpufreq-sakuractive always assumes CONFIG_NO_HZ */
         idle_time = get_cpu_idle_time_us(cpu, wall);
 
 	/* add time spent doing I/O to idle time */
         if (dbs_tuners_ins.io_is_busy) {
                 iowait_time = get_cpu_iowait_time_us(cpu, wall);
-                /* cpufreq-hotplug always assumes CONFIG_NO_HZ */
+                /* cpufreq-sakuractive always assumes CONFIG_NO_HZ */
                 if (iowait_time != -1ULL && idle_time >= iowait_time)
                         idle_time -= iowait_time;
         }
@@ -143,7 +150,7 @@ static inline cputime64_t get_cpu_idle_time(unsigned int cpu, cputime64_t *wall)
 
 /* XXX look at global sysfs macros in cpufreq.h, can those be used here? */
 
-/* cpufreq_hotplug Governor Tunables */
+/* cpufreq_sakuractive Governor Tunables */
 #define show_one(file_name, object)					\
 static ssize_t show_##file_name						\
 (struct kobject *kobj, struct attribute *attr, char *buf)		\
@@ -158,6 +165,23 @@ show_one(hotplug_in_sampling_periods, hotplug_in_sampling_periods);
 show_one(hotplug_out_sampling_periods, hotplug_out_sampling_periods);
 show_one(ignore_nice_load, ignore_nice);
 show_one(io_is_busy, io_is_busy);
+show_one(boost_timeout, boost_timeout);
+
+static ssize_t store_boost_timeout(struct kobject *a, struct attribute *b,
+				   const char *buf, size_t count)
+{
+	unsigned int input;
+	int ret;
+	ret = sscanf(buf, "%u", &input);
+	if (ret != 1)
+		return -EINVAL;
+
+	mutex_lock(&dbs_mutex);
+	dbs_tuners_ins.boost_timeout = input;
+	mutex_unlock(&dbs_mutex);
+
+	return count;
+}
 
 static ssize_t store_sampling_rate(struct kobject *a, struct attribute *b,
 				   const char *buf, size_t count)
@@ -388,6 +412,7 @@ define_one_global_rw(hotplug_in_sampling_periods);
 define_one_global_rw(hotplug_out_sampling_periods);
 define_one_global_rw(ignore_nice_load);
 define_one_global_rw(io_is_busy);
+define_one_global_rw(boost_timeout);
 
 static struct attribute *dbs_attributes[] = {
 	&sampling_rate.attr,
@@ -398,12 +423,13 @@ static struct attribute *dbs_attributes[] = {
 	&hotplug_out_sampling_periods.attr,
 	&ignore_nice_load.attr,
 	&io_is_busy.attr,
+	&boost_timeout.attr,
 	NULL
 };
 
 static struct attribute_group dbs_attr_group = {
 	.attrs = dbs_attributes,
-	.name = "hotplug",
+	.name = "sakuractive",
 };
 
 /************************** sysfs end ************************/
@@ -516,7 +542,7 @@ static void dbs_check_cpu(struct cpu_dbs_info_s *this_dbs_info)
 	/* check if auxiliary CPU is needed based on avg_load */
 	if (avg_load > dbs_tuners_ins.up_threshold) {
 		/* should we enable auxillary CPUs? */
-		if (num_online_cpus() < num_possible_cpus() && hotplug_in_avg_load >
+		if (num_online_cpus() < 2 && hotplug_in_avg_load >
 				dbs_tuners_ins.up_threshold) {
 			queue_work_on(this_dbs_info->cpu, khotplug_wq,
 					&this_dbs_info->cpu_up_work);
@@ -537,7 +563,7 @@ static void dbs_check_cpu(struct cpu_dbs_info_s *this_dbs_info)
 	/* check for frequency decrease */
 	if (avg_load < dbs_tuners_ins.down_threshold) {
 		/* are we at the minimum frequency already? */
-		if (policy->cur == policy->min) {
+		if (policy->cur <= policy->min) {
 			/* should we disable auxillary CPUs? */
 			if (num_online_cpus() > 1 && hotplug_out_avg_load <
 					dbs_tuners_ins.down_threshold) {
@@ -573,14 +599,12 @@ out:
 
 static void do_cpu_up(struct work_struct *work)
 {
-	int i = num_online_cpus();
-	if( i < num_possible_cpus() && !cpu_online(i) ) cpu_up(i);
+	cpu_up(1);
 }
 
 static void do_cpu_down(struct work_struct *work)
 {
-	int i = num_online_cpus() - 1;
-	if( i > 0 && cpu_online(i) ) cpu_down(i);
+	cpu_down(1);
 }
 
 static void do_dbs_timer(struct work_struct *work)
@@ -588,12 +612,20 @@ static void do_dbs_timer(struct work_struct *work)
 	struct cpu_dbs_info_s *dbs_info =
 		container_of(work, struct cpu_dbs_info_s, work.work);
 	unsigned int cpu = dbs_info->cpu;
-
-	/* We want all related CPUs to do sampling nearly on same jiffy */
-	int delay = usecs_to_jiffies(dbs_tuners_ins.sampling_rate);
+	int delay = 0;
 
 	mutex_lock(&dbs_info->timer_mutex);
-	dbs_check_cpu(dbs_info);
+	if (!dbs_info->boost_applied) {
+	    dbs_check_cpu(dbs_info);
+		/* We want all related CPUs to do sampling nearly on same jiffy */
+		delay = usecs_to_jiffies(dbs_tuners_ins.sampling_rate);
+	} else {
+		delay = usecs_to_jiffies(dbs_tuners_ins.boost_timeout);
+		dbs_info->boost_applied = 0;
+		if (num_online_cpus() < 2)
+			queue_work_on(cpu, khotplug_wq,
+						&dbs_info->cpu_up_work);
+	}
 	queue_delayed_work_on(cpu, khotplug_wq, &dbs_info->work, delay);
 	mutex_unlock(&dbs_info->timer_mutex);
 }
@@ -607,6 +639,8 @@ static inline void dbs_timer_init(struct cpu_dbs_info_s *dbs_info)
 	INIT_DELAYED_WORK_DEFERRABLE(&dbs_info->work, do_dbs_timer);
 	INIT_WORK(&dbs_info->cpu_up_work, do_cpu_up);
 	INIT_WORK(&dbs_info->cpu_down_work, do_cpu_down);
+	if (!dbs_info->boost_applied)
+		delay = usecs_to_jiffies(dbs_tuners_ins.boost_timeout);
 	queue_delayed_work_on(dbs_info->cpu, khotplug_wq, &dbs_info->work,
 		delay);
 }
@@ -671,6 +705,8 @@ static int cpufreq_governor_dbs(struct cpufreq_policy *policy,
 				return rc;
 			}
 		}
+		if (!dbs_tuners_ins.boost_timeout)
+			dbs_tuners_ins.boost_timeout =  dbs_tuners_ins.sampling_rate * 30;
 		mutex_unlock(&dbs_mutex);
 
 		mutex_init(&this_dbs_info->timer_mutex);
@@ -709,6 +745,30 @@ static int cpufreq_governor_dbs(struct cpufreq_policy *policy,
 	return 0;
 }
 
+#if 0
+static int hotplug_boost(struct cpufreq_policy *policy)
+{
+	unsigned int cpu = policy->cpu;
+	struct cpu_dbs_info_s *this_dbs_info;
+
+	this_dbs_info = &per_cpu(hp_cpu_dbs_info, cpu);
+
+#if 0
+	/* Already at max? */
+	if (policy->cur == policy->max)
+		return;
+#endif
+
+	mutex_lock(&this_dbs_info->timer_mutex);
+	this_dbs_info->boost_applied = 1;
+	__cpufreq_driver_target(policy, policy->max,
+		CPUFREQ_RELATION_H);
+	mutex_unlock(&this_dbs_info->timer_mutex);
+
+	return 0;
+}
+#endif
+
 static int __init cpufreq_gov_dbs_init(void)
 {
 	int err;
@@ -721,7 +781,7 @@ static int __init cpufreq_gov_dbs_init(void)
 	if (idle_time != -1ULL) {
 		dbs_tuners_ins.up_threshold = DEFAULT_UP_FREQ_MIN_LOAD;
 	} else {
-		pr_err("cpufreq-hotplug: %s: assumes CONFIG_NO_HZ\n",
+		pr_err("cpufreq-sakuractive: %s: assumes CONFIG_NO_HZ\n",
 				__func__);
 		return -EINVAL;
 	}
@@ -731,7 +791,7 @@ static int __init cpufreq_gov_dbs_init(void)
 		pr_err("Creation of khotplug failed\n");
 		return -EFAULT;
 	}
-	err = cpufreq_register_governor(&cpufreq_gov_hotplug);
+	err = cpufreq_register_governor(&cpufreq_gov_sakuractive);
 	if (err)
 		destroy_workqueue(khotplug_wq);
 
@@ -740,15 +800,15 @@ static int __init cpufreq_gov_dbs_init(void)
 
 static void __exit cpufreq_gov_dbs_exit(void)
 {
-	cpufreq_unregister_governor(&cpufreq_gov_hotplug);
+	cpufreq_unregister_governor(&cpufreq_gov_sakuractive);
 	destroy_workqueue(khotplug_wq);
 }
 
-MODULE_AUTHOR("Mike Turquette <mturquette@ti.com>");
-MODULE_DESCRIPTION("'cpufreq_hotplug' - cpufreq governor for dynamic frequency scaling and CPU hotplugging");
+MODULE_AUTHOR("sakuramilk <c.sakuramilk@gmail.com>");
+MODULE_DESCRIPTION("'cpufreq_sakuractive' - cpufreq governor for dynamic frequency scaling and CPU hotplug");
 MODULE_LICENSE("GPL");
 
-#ifdef CONFIG_CPU_FREQ_DEFAULT_GOV_HOTPLUG
+#ifdef CONFIG_CPU_FREQ_DEFAULT_GOV_SAKURACTIVE
 fs_initcall(cpufreq_gov_dbs_init);
 #else
 module_init(cpufreq_gov_dbs_init);
