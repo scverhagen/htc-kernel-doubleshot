@@ -100,7 +100,7 @@ enum {
 /*
  * CPU freq will be increased if measured load > inc_cpu_load;
  */
-#define DEFAULT_INC_CPU_LOAD 70
+#define DEFAULT_INC_CPU_LOAD 60
 static unsigned long inc_cpu_load;
 
 /*
@@ -121,7 +121,7 @@ static unsigned long pump_up_step;
  * Decreasing frequency table index
  * zero disables and will calculate frequency according to load heuristic.
  */
-#define DEFAULT_PUMP_DOWN_STEP 1
+#define DEFAULT_PUMP_DOWN_STEP 0
 static unsigned long pump_down_step;
 
 /*
