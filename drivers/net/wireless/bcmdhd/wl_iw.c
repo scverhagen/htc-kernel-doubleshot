@@ -6443,7 +6443,7 @@ fail:
 	complete_and_exit(&tsk_ctl->completed, 0);
 	return ret;
 }
-#endif 
+#endif
 #ifndef AP_ONLY
 static int last_auto_channel = 6;
 #endif
