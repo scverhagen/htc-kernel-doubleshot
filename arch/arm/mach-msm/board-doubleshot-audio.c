@@ -505,12 +505,9 @@ void doubleshot_aic3254_set_mode(int config, int mode)
 	aic3254_set_mode(config, mode);
 }
 
-
-/**
 static struct q6v2audio_aic3254_ops aops = {
        .aic3254_set_mode = doubleshot_aic3254_set_mode,
 };
-**/
 
 void __init doubleshot_audio_init(void)
 {
@@ -527,8 +524,7 @@ void __init doubleshot_audio_init(void)
 	htc_8x60_register_aic3254_ops(&aops);
 
 	/*fix voice sample rate as 8KHz for 3254 dual mic.*/
-	// msm_set_voc_freq(8000, 8000);
-	msm_set_voc_freq(48000, 48000);
+	msm_set_voc_freq(8000, 8000);
 #endif
 	aic3254_register_ctl_ops(&cops);
 
